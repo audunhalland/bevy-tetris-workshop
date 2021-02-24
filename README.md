@@ -102,7 +102,7 @@ managed by Bevy. Inside a system, it may be accessed through an parameter of the
 How everything fits together in the end will hopefully be apparent when we go through the source file!
 
 ## Rapier
-Rapier is the physics engine. It is separate from Bevy, but thankfully they provide a plugin!
+Rapier (https://rapier.rs/) is the physics engine. It is separate from Bevy, but thankfully they provide a plugin!
 
 A very high level overview of what the Rapier system(s) do:
 1. Compute mechanical interactions in the physics domain
