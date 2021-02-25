@@ -35,7 +35,9 @@ basic Rust syntax we'll encounter.
 
 ## Bevy
 Bevy (https://bevyengine.org) a simple data-driven game engine.
-Bevy is designed around an [Entity Component System](https://en.wikipedia.org/wiki/Entity_component_system):
+Bevy is designed around an [Entity Component System](https://en.wikipedia.org/wiki/Entity_component_system).
+
+*Bevy's [Getting Started Guide](https://bevyengine.org/learn/book/getting-started/ecs/) has a good ECS introduction, but I'll try to explain it here as well:*
 
 ### Entity
 All game objects are dumb _Entities_, which can be thought of as some kind of Object ID.
@@ -82,12 +84,15 @@ fn my_system(commands: &mut Commands) {
 }
 ```
 
-There are no rules for the argument structure of systems. A system does not need
-to take a command parameter:
+There are _no specific rules_ for the function signature of systems. A system does not need
+to take a command parameter, and it accepts any number of queries:
 
 ```rust
-fn my_other_system(query: Query<(Entity, &MyComponent)>) {
-    for (entity, my_component) in query.iter() {
+fn my_other_system(
+    query1: Query<(Entity, &MyComponent)>,
+    query2: Query<&Other>
+) {
+    for (entity, my_component) in query1.iter() {
         println!("my_component: {}", my_component);
     }
 }
