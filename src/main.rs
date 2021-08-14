@@ -1,29 +1,20 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
-use bevy::render::camera::OrthographicProjection;
 use bevy::render::pass::ClearColor;
-use bevy_rapier2d::physics::{
-    JointBuilderComponent, RapierConfiguration, RapierPhysicsPlugin, RigidBodyHandleComponent,
-};
-use bevy_rapier2d::rapier::dynamics::{BallJoint, RigidBody, RigidBodyBuilder, RigidBodySet};
-use bevy_rapier2d::rapier::geometry::ColliderBuilder;
-use bevy_rapier2d::rapier::na::Vector2;
-use nalgebra::Point2;
+use bevy_rapier2d::prelude::*;
 use rand::Rng;
 
 fn main() {
     // Set up Bevy
     App::build()
         .init_resource::<Game>()
-        .add_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
-        .add_resource(Msaa::default())
+        .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
+        .insert_resource(Msaa::default())
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup_game.system())
-        .add_startup_system(setup_board.system())
-        .add_startup_system(setup_initial_tetromino.system())
         .add_system(tetromino_movement.system())
-        .add_plugin(RapierPhysicsPlugin)
+        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .run();
 }
 
@@ -64,7 +55,6 @@ const BLOCK_PX_SIZE: f32 = 30.0;
 // In terms of block size:
 const FLOOR_BLOCK_HEIGHT: f32 = 2.0;
 
-const BLOCK_MASS: f32 = 1.0;
 const BLOCK_LINEAR_DAMPING: f32 = 1.0;
 
 const MOVEMENT_FORCE: f32 = 20.0;
@@ -132,20 +122,27 @@ impl Default for Game {
     }
 }
 
-fn byte_rgb(r: u8, g: u8, b: u8) -> Color {
-    Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
-}
-
 fn setup_game(
-    commands: &mut Commands,
+    mut commands: Commands,
     mut game: ResMut<Game>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut rapier_config: ResMut<RapierConfiguration>,
 ) {
     rapier_config.scale = BLOCK_PX_SIZE;
 
-    game.block_color = Some(materials.add(byte_rgb(0, 244, 243).into()));
-    game.camera = commands.spawn(Camera2dBundle::default()).current_entity();
+    game.block_color = Some(materials.add(Color::rgb_u8(0, 244, 243).into()));
+
+    game.camera = Some(
+        commands
+            .spawn()
+            .insert_bundle(OrthographicCameraBundle::new_2d())
+            .id(),
+    );
+
+    setup_board(&mut commands, &*game, materials);
+
+    // initial tetromino
+    spawn_tetromino(&mut commands, &mut game);
 }
 
 /// Represent Tetris' different tetromino kinds
@@ -193,18 +190,15 @@ struct TetrominoLayout {
 struct Block;
 
 // startup system
-fn setup_board(
-    commands: &mut Commands,
-    game: Res<Game>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
+fn setup_board(commands: &mut Commands, game: &Game, mut materials: ResMut<Assets<ColorMaterial>>) {
     let floor_y = game.floor_y();
 
     // Add a "floor" - something blocks collide with when they hit the bottom of the board.
     // The floor is a *static* rigid body. It has infinite mass, and should
     // not be influenced by any forces.
     commands
-        .spawn(SpriteBundle {
+        .spawn()
+        .insert_bundle(SpriteBundle {
             material: materials.add(Color::rgb(0.5, 0.5, 0.5).into()),
             sprite: Sprite::new(Vec2::new(
                 game.n_lanes as f32 * BLOCK_PX_SIZE,
@@ -212,16 +206,16 @@ fn setup_board(
             )),
             ..Default::default()
         })
-        .with(RigidBodyBuilder::new_static().translation(0.0, floor_y - (FLOOR_BLOCK_HEIGHT * 0.5)))
-        .with(ColliderBuilder::cuboid(
-            game.n_lanes as f32 * 0.5,
-            FLOOR_BLOCK_HEIGHT * 0.5,
-        ));
-}
-
-// startup system
-fn setup_initial_tetromino(commands: &mut Commands, mut game: ResMut<Game>) {
-    spawn_tetromino(commands, &mut game);
+        .insert_bundle(RigidBodyBundle {
+            body_type: bevy_rapier2d::prelude::RigidBodyType::Static,
+            position: [0.0, floor_y - (FLOOR_BLOCK_HEIGHT * 0.5)].into(),
+            ..RigidBodyBundle::default()
+        })
+        .insert_bundle(ColliderBundle {
+            shape: ColliderShape::cuboid(game.n_lanes as f32 * 0.5, FLOOR_BLOCK_HEIGHT * 0.5),
+            ..ColliderBundle::default()
+        })
+        .insert(RigidBodyPositionSync::Discrete);
 }
 
 fn spawn_tetromino(commands: &mut Commands, game: &mut Game) {
@@ -257,38 +251,42 @@ fn spawn_block(
 
     println!("block physics coords: {}, {}", x, y);
 
-    let rigid_body = RigidBodyBuilder::new_dynamic()
-        .translation(x, y)
-        .mass(BLOCK_MASS)
-        .linear_damping(BLOCK_LINEAR_DAMPING);
-    let collider = ColliderBuilder::cuboid(0.5, 0.5).density(1.0);
-
     commands
-        .spawn(SpriteBundle {
+        .spawn()
+        .insert_bundle(SpriteBundle {
             material: game.block_color.clone().unwrap(),
             sprite: Sprite::new(Vec2::new(BLOCK_PX_SIZE, BLOCK_PX_SIZE)),
             ..Default::default()
         })
-        .with(rigid_body)
-        .with(collider)
-        .with(Block)
-        .current_entity()
-        .unwrap()
+        .insert_bundle(RigidBodyBundle {
+            position: [x, y].into(),
+            damping: RigidBodyDamping {
+                linear_damping: BLOCK_LINEAR_DAMPING,
+                angular_damping: 0.0,
+            },
+            ..RigidBodyBundle::default()
+        })
+        .insert_bundle(ColliderBundle {
+            shape: ColliderShape::cuboid(0.5, 0.5),
+            ..ColliderBundle::default()
+        })
+        .insert(RigidBodyPositionSync::Discrete)
+        .insert(Block)
+        .id()
 }
 
 // system
 fn tetromino_movement(
     input: Res<Input<KeyCode>>,
     game: Res<Game>,
-    rigid_body_query: Query<&RigidBodyHandleComponent>,
-    mut rigid_bodies: ResMut<RigidBodySet>,
+    mut forces_query: Query<&mut RigidBodyForces>,
 ) {
     let movement = input.pressed(KeyCode::Right) as i8 - input.pressed(KeyCode::Left) as i8;
 
-    for rigid_body_component in rigid_body_query.iter() {
-        if let Some(rigid_body) = rigid_bodies.get_mut(rigid_body_component.handle()) {
+    for block_entity in &game.current_tetromino_blocks {
+        if let Ok(mut forces) = forces_query.get_mut(*block_entity) {
             if movement != 0 {
-                rigid_body.apply_force(Vector2::new(movement as f32 * MOVEMENT_FORCE, 0.0), true);
+                forces.force = Vec2::new(movement as f32 * MOVEMENT_FORCE, 0.0).into();
             }
         }
     }
@@ -296,25 +294,23 @@ fn tetromino_movement(
 
 // system
 fn tetromino_sleep_detection(
-    commands: &mut Commands,
+    mut commands: Commands,
     mut game: ResMut<Game>,
-    block_query: Query<(Entity, &RigidBodyHandleComponent)>,
-    rigid_bodies: ResMut<RigidBodySet>,
+    block_query: Query<(Entity, &RigidBodyActivation, &RigidBodyPosition)>,
 ) {
     let all_blocks_sleeping = game.current_tetromino_blocks.iter().all(|block_entity| {
         block_query
             .get(*block_entity)
             .ok()
-            .and_then(|(_, rigid_body_component)| rigid_bodies.get(rigid_body_component.handle()))
-            .map(RigidBody::is_sleeping)
+            .map(|(_, activation, _)| (activation.sleeping))
             .unwrap_or(false)
     });
 
     if all_blocks_sleeping {
         for joint in &game.current_tetromino_joints {
-            commands.despawn(*joint);
+            commands.entity(*joint).despawn();
         }
 
-        spawn_tetromino(commands, &mut game);
+        spawn_tetromino(&mut commands, &mut game);
     }
 }
